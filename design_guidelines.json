@@ -1,0 +1,111 @@
+{
+  "theme": "dark",
+  "archetype": "5 (Jewel & Luxury) - Cinematic Film Studio Variant",
+  "typography": {
+    "font_families": {
+      "heading": "Cabinet Grotesk, sans-serif",
+      "body": "Satoshi, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "rules": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-black leading-none",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-bold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-semibold",
+      "body": "text-base leading-relaxed font-medium",
+      "small_labels": "text-xs tracking-[0.2em] uppercase font-bold"
+    }
+  },
+  "colors": {
+    "background": {
+      "base": "#0a0a0a",
+      "surface": "#141414",
+      "surface_glass": "rgba(20, 20, 20, 0.6)"
+    },
+    "text": {
+      "primary": "#f4f4f5",
+      "secondary": "#a1a1aa",
+      "inverse": "#0a0a0a"
+    },
+    "brand": {
+      "primary": "#d97736",
+      "primary_hover": "#f2a900",
+      "accent_red": "#9B111E",
+      "accent_green": "#2E8B57"
+    },
+    "border": {
+      "subtle": "rgba(255, 255, 255, 0.1)",
+      "strong": "rgba(255, 255, 255, 0.2)"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing Philosophy - use 2x standard padding (e.g. p-8 or p-12 for sections).",
+    "grids": {
+      "scenario_gallery": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6",
+      "chat_layout": "grid grid-cols-1 md:grid-cols-[300px_1fr] h-screen overflow-hidden"
+    },
+    "borders_and_radius": {
+      "cards": "rounded-2xl",
+      "buttons": "rounded-full",
+      "chat_bubbles": "rounded-2xl"
+    }
+  },
+  "surfaces_and_effects": {
+    "glassmorphism": "backdrop-blur-xl bg-white/5 border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)]",
+    "cards_hover": "transition-transform duration-300 hover:-translate-y-2 hover:shadow-[0_0_40px_rgba(217,119,54,0.15)] hover:border-white/20",
+    "hero_overlay": "bg-gradient-to-b from-black/30 via-black/60 to-[#0a0a0a]"
+  },
+  "components": {
+    "navigation": "Crystal Glass sticky header. z-50. Backdrop-blur-xl bg-[#0a0a0a]/70 border-b border-white/10. Include Logo, Nav links, and 'Pro' CTA.",
+    "buttons": {
+      "primary": "bg-[#d97736] text-[#0a0a0a] font-bold hover:bg-[#f2a900] transition-colors rounded-full px-6 py-3",
+      "secondary": "bg-white/5 text-white border border-white/10 hover:bg-white/10 transition-colors rounded-full px-6 py-3",
+      "mic_button": "w-16 h-16 rounded-full bg-[#d97736] text-[#0a0a0a] flex items-center justify-center shadow-[0_0_30px_rgba(217,119,54,0.4)] hover:scale-105 transition-transform"
+    },
+    "scenario_cards": "Use Shadcn Card. MUST be min-h-[400px]. Background image covering full card. Add bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/80 to-transparent for text readability. Content packed at bottom.",
+    "chat_interface": {
+      "ai_bubble": "Glassmorphism surface. Text left aligned. Avatar next to bubble.",
+      "user_bubble": "Solid bg-[#3f3f46] or bg-[#d97736] with text-[#0a0a0a]. Text right aligned.",
+      "tone_indicator": "Use Shadcn Badge with varied colors depending on tone (e.g., Red for Angry, Blue for Formal)."
+    },
+    "forms": "Use Shadcn Input/Select. bg-[#141414] border-white/10 text-white focus:border-[#d97736] focus:ring-1 focus:ring-[#d97736].",
+    "icons": "Use @phosphor-icons/react or lucide-react. Duotone or bold weights."
+  },
+  "motion": {
+    "page_transition": "opacity fade-in duration-500",
+    "list_stagger": "stagger children by 0.1s on entry",
+    "mic_pulse": "animate-pulse for recording state"
+  },
+  "accessibility": {
+    "contrast": "Ensure text over images has minimum 4.5:1 ratio using dark gradient overlays.",
+    "focus": "focus-visible:ring-2 focus-visible:ring-[#d97736] focus-visible:outline-none",
+    "testing": "All interactive elements MUST include data-testid attributes (e.g., data-testid='start-roleplay-button')."
+  },
+  "media": {
+    "hero": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/9b4a785ba9e14b0db789a544047a24fd292d21fe50d80eec1f9eba3bbf9efb2f.png",
+      "description": "Cinematic close-up of people talking, use as background for landing page hero section."
+    },
+    "texture": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/381dd134595e016be9ad7758501d45fd070f7f53f1687be788a4e24b84c03db9.png",
+      "description": "Dark cinematic film grain texture. Use as subtle background repeating pattern or overlay in chat views."
+    },
+    "characters": {
+      "immigration_officer": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/64719eee48c1f0f558f7b269dd74d95fe345d52a7f1b980ff13977e12bd8f0fb.png",
+      "angry_customer": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/0a77ed86bf6f82d6b299d320ab902e46b327998901248bef540966f22608d927.png",
+      "french_waiter": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/99ec13d506938d89acb6d4b4b01afaa6f1af1884ac12b106cb298628a57d541b.png",
+      "job_interviewer": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/b0ec318d23c8a53cd44615c4cbb866be2d91d40a5c10265aed0a1ae46592c2ee.png",
+      "doctor": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/7af2a556fa853f60069d0adfadd45ba1450d40d4a09b92f4d00e69dae499bcd0.png",
+      "partner": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/4f126367f50b23bc890871893928d91df8ca8f7743a9d7ab27991989eef572b9.png",
+      "landlord": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/c8f14988a2bc7893bb5d5143fd3293f79340bd7fa06950e15840d698f16c3970.png",
+      "police_officer": "https://static.prod-images.emergentagent.com/jobs/b12d662d-6196-4a76-be6c-30990b739463/images/3ff09ca4e77f974cf0a635c42bcc7f5523db9765a4c650e1a21c447a88e7b1a7.png"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install and use Cabinet Grotesk and Satoshi fonts via Fontshare or similar webfont loader if possible, else fallback to Inter/system fonts ONLY if webfonts fail.",
+    "Use framer-motion for page transitions and micro-interactions.",
+    "Implement the Scenario Selection as a Bento grid with image backgrounds. DO NOT use generic colored cards.",
+    "For the chat interface, make the UI feel like a 'Simulator' rather than a standard messaging app. Use the cinematic_texture image as a subtle background pattern behind the chat messages.",
+    "Ensure the microphone button is visually distinct, using the brand.primary color (#d97736).",
+    "Use pure Tailwind + standard HTML for marketing/landing pages; use heavily customized Shadcn for the Dashboard, Auth, and Chat UI."
+  ]
+}

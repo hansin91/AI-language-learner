@@ -33,6 +33,18 @@ export default function Chat() {
   // Speaking speed (TTS) — persisted per session
   const [speed, setSpeed] = useState(1.0);
 
+  // Accessibility: announce state changes to screen readers
+  const [announce, setAnnounce] = useState("");
+  // Track if browser/permission supports mic at all
+  const [micSupported] = useState(
+    () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined"
+  );
+  const [permissionHelp, setPermissionHelp] = useState(false);
+
+  // Recording timer (for live aria-region & user feedback)
+  const [recordingSec, setRecordingSec] = useState(0);
+  const recordingTimerRef = useRef(null);
+
   const scrollRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -127,6 +139,11 @@ export default function Chat() {
 
   const startRecording = async () => {
     setError("");
+    setPermissionHelp(false);
+    if (!micSupported) {
+      setError("Your browser doesn't support audio recording. Use the text input instead.");
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
@@ -135,20 +152,37 @@ export default function Chat() {
       rec.ondataavailable = (e) => e.data.size > 0 && audioChunksRef.current.push(e.data);
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setRecordingSec(0);
         const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         await transcribe(blob);
       };
       mediaRecorderRef.current = rec;
       rec.start();
       setRecording(true);
+      setAnnounce("Recording started. Press the microphone again, or press Space, to stop.");
+      setRecordingSec(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSec((s) => s + 1), 1000);
     } catch (e) {
-      setError("Microphone access denied. Use text instead.");
+      if (e?.name === "NotAllowedError" || e?.name === "PermissionDeniedError") {
+        setPermissionHelp(true);
+        setError("Microphone permission denied.");
+        setAnnounce("Microphone permission denied. Use the text field instead.");
+      } else if (e?.name === "NotFoundError") {
+        setError("No microphone found on this device. Use the text field instead.");
+      } else {
+        setError("Couldn't access the microphone. Use the text field instead.");
+      }
     }
   };
 
   const stopRecording = () => {
     mediaRecorderRef.current?.stop();
     setRecording(false);
+    setAnnounce("Recording stopped. Transcribing your speech.");
   };
 
   const transcribe = async (blob) => {
@@ -170,16 +204,49 @@ export default function Chat() {
       }
       const { text } = await resp.json();
       if (text && text.trim()) {
+        setAnnounce(`Heard: ${text.trim()}`);
         await send(text.trim());
       } else {
         setError("Couldn't hear that — try again.");
+        setAnnounce("No speech detected. Try speaking again.");
       }
     } catch (e) {
       setError(e.message);
+      setAnnounce("Transcription failed.");
     } finally {
       setTranscribing(false);
     }
   };
+
+  // Keyboard shortcut: Space toggles main mic (when not typing in input), Esc cancels
+  useEffect(() => {
+    const isTypingTarget = (el) => {
+      const tag = (el?.tagName || "").toLowerCase();
+      return tag === "input" || tag === "textarea" || el?.isContentEditable;
+    };
+    const onKey = (e) => {
+      if (isTypingTarget(e.target)) return;
+      if (e.code === "Space" || e.key === " ") {
+        if (transcribing || sending) return;
+        e.preventDefault();
+        if (recording) stopRecording();
+        else startRecording();
+      } else if (e.key === "Escape" && recording) {
+        e.preventDefault();
+        stopRecording();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recording, transcribing, sending, micSupported]);
+
+  // Cleanup recording timer on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, []);
 
   const endScene = async () => {
     if (ending) return;
@@ -365,18 +432,20 @@ export default function Chat() {
                         <button
                           onClick={() => speakText(m.text, i)}
                           className="text-xs opacity-60 hover:opacity-100"
-                          title="Play"
+                          title="Play audio"
+                          aria-label={playingMsg === i ? "Currently playing this message" : "Play this message as audio"}
                           data-testid={`play-msg-${i}`}
                         >
-                          <Volume2 size={12} className={`inline ${playingMsg === i ? "text-[#d97736]" : ""}`} />
+                          <Volume2 size={12} className={`inline ${playingMsg === i ? "text-[#d97736]" : ""}`} aria-hidden="true" />
                         </button>
                         <button
                           onClick={() => openPron(i, m.text)}
                           className="text-xs opacity-60 hover:opacity-100"
-                          title="Repeat after me"
+                          title="Practice this line — Repeat after me"
+                          aria-label="Practice pronouncing this line. Opens a recording panel."
                           data-testid={`pron-msg-${i}`}
                         >
-                          <Repeat size={12} className="inline" />
+                          <Repeat size={12} className="inline" aria-hidden="true" />
                         </button>
                       </span>
                     )}
@@ -410,26 +479,68 @@ export default function Chat() {
       {/* Composer */}
       <div className="border-t border-white/5 glass-strong">
         <div className="max-w-3xl mx-auto px-6 py-5">
+          {/* SR-only live region — announces recording/transcribe state */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="chat-aria-live">
+            {announce}
+          </div>
+
           {error && (
-            <div className="mb-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5" data-testid="chat-error">
+            <div
+              className="mb-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5"
+              role="alert"
+              data-testid="chat-error"
+            >
               {error}
+              {permissionHelp && (
+                <div className="mt-2 text-zinc-400 text-[11px] leading-relaxed">
+                  To enable: click the <span className="text-white">🔒 lock</span> icon in your browser's address bar →
+                  <span className="text-white"> Site settings</span> → set <span className="text-white">Microphone</span> to <span className="text-white">Allow</span>, then reload.
+                </div>
+              )}
             </div>
           )}
+
+          {recording && (
+            <div className="mb-3 flex items-center gap-2 text-xs text-[#d97736]" data-testid="recording-indicator">
+              <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+              Recording · {String(Math.floor(recordingSec / 60)).padStart(2, "0")}:{String(recordingSec % 60).padStart(2, "0")} ·
+              <span className="text-zinc-500">press Space or click to stop</span>
+            </div>
+          )}
+
           <div className="flex items-end gap-3">
             <button
               onClick={recording ? stopRecording : startRecording}
-              disabled={transcribing || sending}
+              disabled={transcribing || sending || !micSupported}
               className={`mic-btn shrink-0 ${recording ? "recording" : ""}`}
-              title={recording ? "Stop" : "Speak"}
+              title={
+                !micSupported
+                  ? "Microphone not supported"
+                  : recording
+                    ? "Stop recording (Space or Esc)"
+                    : "Start recording (Space)"
+              }
+              aria-label={
+                recording
+                  ? `Stop voice recording. Currently recording for ${recordingSec} seconds.`
+                  : "Start voice recording. Press Space to start or stop."
+              }
+              aria-pressed={recording}
+              aria-keyshortcuts="Space Escape"
               data-testid="chat-mic-btn"
             >
               {transcribing ? (
-                <div className="typing-dots"><span /><span /><span /></div>
+                <span aria-hidden="true">
+                  <span className="typing-dots"><span /><span /><span /></span>
+                </span>
               ) : recording ? (
-                <Square size={20} fill="currentColor" />
+                <Square size={20} fill="currentColor" aria-hidden="true" />
               ) : (
-                <Mic size={22} />
+                <Mic size={22} aria-hidden="true" />
               )}
+              <span className="sr-only">
+                {transcribing ? "Transcribing your speech" : recording ? "Recording — tap to stop" : "Voice input"}
+              </span>
             </button>
 
             <div className="flex-1">
@@ -495,17 +606,23 @@ function PronChallengePanel({ text, recording, scoring, result, error, onStart, 
             disabled={scoring}
             className={`mic-btn ${recording ? "recording" : ""}`}
             style={{ width: 48, height: 48 }}
+            aria-label={recording ? "Stop recording your pronunciation attempt" : "Start recording your pronunciation attempt"}
+            aria-pressed={recording}
+            title={recording ? "Stop recording" : "Start recording"}
             data-testid="pron-mic-btn"
           >
             {scoring ? (
-              <div className="typing-dots"><span /><span /><span /></div>
+              <span aria-hidden="true">
+                <span className="typing-dots"><span /><span /><span /></span>
+              </span>
             ) : recording ? (
-              <Square size={16} fill="currentColor" />
+              <Square size={16} fill="currentColor" aria-hidden="true" />
             ) : (
-              <Mic size={18} />
+              <Mic size={18} aria-hidden="true" />
             )}
+            <span className="sr-only">{recording ? "Recording" : "Record"}</span>
           </button>
-          <div className="text-xs text-zinc-400">
+          <div className="text-xs text-zinc-400" aria-live="polite">
             {scoring ? "Scoring…" : recording ? "Recording — tap to stop." : "Tap and say it out loud."}
           </div>
         </div>

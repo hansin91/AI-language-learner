@@ -246,9 +246,20 @@ h4,
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     cursor: pointer;
     border: none;
+    position: relative;
 }
 .mic-btn:hover {
     transform: scale(1.06);
+}
+.mic-btn:focus-visible {
+    outline: 3px solid #ffffff;
+    outline-offset: 4px;
+    box-shadow: 0 0 0 6px rgba(217, 119, 54, 0.5), 0 0 30px rgba(217, 119, 54, 0.6);
+}
+.mic-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
 }
 .mic-btn.recording {
     background: var(--accent-red);
@@ -262,6 +273,29 @@ h4,
     50% {
         box-shadow: 0 0 0 18px rgba(155, 17, 30, 0);
     }
+}
+@media (prefers-reduced-motion: reduce) {
+    .mic-btn,
+    .mic-btn.recording {
+        animation: none !important;
+        transition: none !important;
+    }
+    .mic-btn:hover {
+        transform: none;
+    }
+}
+
+/* ---------- Screen-reader only ---------- */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 /* ---------- Typing dots ---------- */

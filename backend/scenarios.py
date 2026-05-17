@@ -157,15 +157,14 @@ DIFFICULTIES = {
 }
 
 
-def build_system_prompt(scenario_id: str, language_code: str, difficulty_code: str) -> str:
-    sc = SCENARIOS[scenario_id]
+def _scene_template(name, location, personality, tone, language_code, difficulty_code):
     lang = LANGUAGES[language_code]
     diff = DIFFICULTIES[difficulty_code]
-    return f"""You are roleplaying as: {sc['name']}.
+    return f"""You are roleplaying as: {name}.
 
-Setting: {sc['location']}.
-Personality: {sc['personality']}
-Emotional tone: {sc['tone']}.
+Setting: {location}.
+Personality: {personality}
+Emotional tone: {tone}.
 
 The user is a language learner practicing {lang['label']} at {diff['label']} level.
 
@@ -185,10 +184,28 @@ ROLEPLAY RULES:
 Begin the scene already in progress. Do not narrate actions in asterisks. Just speak."""
 
 
-def build_feedback_prompt(language_code: str, scenario_id: str) -> str:
-    lang = LANGUAGES[language_code]
+def build_system_prompt(scenario_id: str, language_code: str, difficulty_code: str) -> str:
     sc = SCENARIOS[scenario_id]
-    return f"""You are a {lang['label']} language coach reviewing a roleplay conversation between a learner (USER) and an AI {sc['name']}.
+    return _scene_template(
+        name=sc['name'], location=sc['location'],
+        personality=sc['personality'], tone=sc['tone'],
+        language_code=language_code, difficulty_code=difficulty_code,
+    )
+
+
+def build_system_prompt_from_char(char: dict, language_code: str, difficulty_code: str) -> str:
+    return _scene_template(
+        name=char.get('name', 'a character'),
+        location=char.get('location', 'an unspecified place'),
+        personality=char.get('personality', 'natural and reactive'),
+        tone=char.get('tone', 'neutral'),
+        language_code=language_code, difficulty_code=difficulty_code,
+    )
+
+
+def build_feedback_prompt(language_code: str, scenario_name: str) -> str:
+    lang = LANGUAGES[language_code]
+    return f"""You are a {lang['label']} language coach reviewing a roleplay conversation between a learner (USER) and an AI {scenario_name}.
 
 Analyze ONLY the USER's messages. Return strict JSON with this exact shape — no markdown, no commentary:
 

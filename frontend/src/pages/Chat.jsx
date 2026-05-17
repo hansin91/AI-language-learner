@@ -4,7 +4,8 @@ import Navbar from "@/components/Navbar";
 import api, { API, CHARACTER_IMAGES, formatApiError } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Send, MapPin, Square, Volume2, VolumeX, Flag } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Mic, MicOff, Send, MapPin, Square, Volume2, VolumeX, Flag, Repeat, X } from "lucide-react";
 
 export default function Chat() {
   const { sessionId } = useParams();
@@ -18,6 +19,16 @@ export default function Chat() {
   const [speakReply, setSpeakReply] = useState(true);
   const [ending, setEnding] = useState(false);
   const [playingMsg, setPlayingMsg] = useState(null);
+
+  // Pronunciation challenge state
+  const [pronMsgIdx, setPronMsgIdx] = useState(null);
+  const [pronRecording, setPronRecording] = useState(false);
+  const [pronScoring, setPronScoring] = useState(false);
+  const [pronResult, setPronResult] = useState(null);
+  const [pronError, setPronError] = useState("");
+  const pronRecorderRef = useRef(null);
+  const pronChunksRef = useRef([]);
+  const pronTextRef = useRef("");
 
   const scrollRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -172,6 +183,79 @@ export default function Chat() {
     }
   };
 
+  // ---- Pronunciation challenge ----
+  const openPron = (idx, text) => {
+    setPronMsgIdx(idx);
+    setPronResult(null);
+    setPronError("");
+    pronTextRef.current = text;
+  };
+
+  const closePron = () => {
+    if (pronRecording) {
+      try { pronRecorderRef.current?.stop(); } catch {}
+    }
+    setPronMsgIdx(null);
+    setPronResult(null);
+    setPronError("");
+    setPronRecording(false);
+    setPronScoring(false);
+  };
+
+  const startPronRecording = async () => {
+    setPronError("");
+    setPronResult(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      pronChunksRef.current = [];
+      rec.ondataavailable = (e) => e.data.size > 0 && pronChunksRef.current.push(e.data);
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(pronChunksRef.current, { type: "audio/webm" });
+        await scorePron(blob);
+      };
+      pronRecorderRef.current = rec;
+      rec.start();
+      setPronRecording(true);
+    } catch {
+      setPronError("Microphone access denied.");
+    }
+  };
+
+  const stopPronRecording = () => {
+    pronRecorderRef.current?.stop();
+    setPronRecording(false);
+  };
+
+  const scorePron = async (blob) => {
+    setPronScoring(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", blob, "pron.webm");
+      fd.append("reference_text", pronTextRef.current);
+      fd.append("language", session?.language || "en");
+      const token = localStorage.getItem("access_token");
+      const resp = await fetch(`${API}/voice/pronunciation`, {
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(formatApiError(j.detail) || "Pronunciation failed");
+      }
+      const data = await resp.json();
+      setPronResult(data);
+    } catch (e) {
+      setPronError(e.message);
+    } finally {
+      setPronScoring(false);
+    }
+  };
+
   if (!session) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] text-white">
@@ -193,7 +277,7 @@ export default function Chat() {
           <div className="flex items-center gap-4">
             <div
               className="w-14 h-14 rounded-full bg-cover bg-center border border-white/10"
-              style={{ backgroundImage: `url(${CHARACTER_IMAGES[session.scenario_id]})` }}
+              style={{ backgroundImage: `url(${CHARACTER_IMAGES[session.char?.image_key || session.scenario_id] || CHARACTER_IMAGES.immigration_officer})` }}
               data-testid="chat-character-avatar"
             />
             <div>
@@ -231,25 +315,51 @@ export default function Chat() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto relative film-grain">
         <div className="max-w-3xl mx-auto px-6 py-8 space-y-5 relative z-[2]">
           {session.messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} fade-up`}>
-              {m.role === "assistant" && (
-                <div
-                  className="w-9 h-9 rounded-full bg-cover bg-center border border-white/10 mr-3 shrink-0"
-                  style={{ backgroundImage: `url(${CHARACTER_IMAGES[session.scenario_id]})` }}
-                />
-              )}
-              <div className={m.role === "user" ? "bubble-user" : "bubble-ai"} data-testid={`msg-${i}`}>
-                {m.text}
+            <div key={i} className="fade-up">
+              <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 {m.role === "assistant" && (
-                  <button
-                    onClick={() => speakText(m.text, i)}
-                    className="ml-2 text-xs opacity-60 hover:opacity-100"
-                    title="Play"
-                    data-testid={`play-msg-${i}`}
-                  >
-                    <Volume2 size={12} className={`inline ${playingMsg === i ? "text-[#d97736]" : ""}`} />
-                  </button>
+                  <div
+                    className="w-9 h-9 rounded-full bg-cover bg-center border border-white/10 mr-3 shrink-0"
+                    style={{ backgroundImage: `url(${CHARACTER_IMAGES[session.char?.image_key || session.scenario_id] || CHARACTER_IMAGES.immigration_officer})` }}
+                  />
                 )}
+                <div className="flex flex-col gap-1 max-w-[80%]">
+                  <div className={m.role === "user" ? "bubble-user" : "bubble-ai"} data-testid={`msg-${i}`}>
+                    {m.text}
+                    {m.role === "assistant" && (
+                      <span className="ml-2 inline-flex items-center gap-2">
+                        <button
+                          onClick={() => speakText(m.text, i)}
+                          className="text-xs opacity-60 hover:opacity-100"
+                          title="Play"
+                          data-testid={`play-msg-${i}`}
+                        >
+                          <Volume2 size={12} className={`inline ${playingMsg === i ? "text-[#d97736]" : ""}`} />
+                        </button>
+                        <button
+                          onClick={() => openPron(i, m.text)}
+                          className="text-xs opacity-60 hover:opacity-100"
+                          title="Repeat after me"
+                          data-testid={`pron-msg-${i}`}
+                        >
+                          <Repeat size={12} className="inline" />
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                  {pronMsgIdx === i && (
+                    <PronChallengePanel
+                      text={m.text}
+                      recording={pronRecording}
+                      scoring={pronScoring}
+                      result={pronResult}
+                      error={pronError}
+                      onStart={startPronRecording}
+                      onStop={stopPronRecording}
+                      onClose={closePron}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -316,6 +426,98 @@ export default function Chat() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PronChallengePanel({ text, recording, scoring, result, error, onStart, onStop, onClose }) {
+  const scoreColor = (s) =>
+    s >= 85 ? "text-emerald-400" : s >= 65 ? "text-[#d97736]" : "text-red-400";
+  return (
+    <div
+      className="rounded-2xl bg-[#141414] border border-[#d97736]/40 p-4 mt-1 shadow-[0_0_20px_rgba(217,119,54,0.15)]"
+      data-testid="pron-panel"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] uppercase tracking-[0.2em] text-[#d97736] font-bold flex items-center gap-1.5">
+          <Repeat size={11} /> Repeat after me
+        </div>
+        <button
+          onClick={onClose}
+          className="text-zinc-500 hover:text-white"
+          title="Close"
+          data-testid="pron-close-btn"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      <div className="text-sm text-zinc-300 mb-4 leading-relaxed italic">"{text}"</div>
+
+      {!result && (
+        <div className="flex items-center gap-3">
+          <button
+            onClick={recording ? onStop : onStart}
+            disabled={scoring}
+            className={`mic-btn ${recording ? "recording" : ""}`}
+            style={{ width: 48, height: 48 }}
+            data-testid="pron-mic-btn"
+          >
+            {scoring ? (
+              <div className="typing-dots"><span /><span /><span /></div>
+            ) : recording ? (
+              <Square size={16} fill="currentColor" />
+            ) : (
+              <Mic size={18} />
+            )}
+          </button>
+          <div className="text-xs text-zinc-400">
+            {scoring ? "Scoring…" : recording ? "Recording — tap to stop." : "Tap and say it out loud."}
+          </div>
+        </div>
+      )}
+
+      {error && <div className="text-xs text-red-400 mt-2">{error}</div>}
+
+      {result && (
+        <div data-testid="pron-result">
+          <div className="flex items-end gap-6 mb-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">Score</div>
+              <div className={`font-display font-black text-4xl leading-none ${scoreColor(result.overall_score)}`} data-testid="pron-score">
+                {result.overall_score}
+              </div>
+            </div>
+            <div className="text-xs text-zinc-500 space-y-1">
+              <div>Accuracy: <span className="text-white font-semibold">{result.accuracy}%</span></div>
+              <div>Pace: <span className="text-white font-semibold">{result.pace_wpm || "—"} wpm</span></div>
+            </div>
+          </div>
+          <Progress value={result.overall_score} className="h-1.5 bg-white/5 mb-3" />
+          <div className="flex flex-wrap gap-1.5">
+            {result.words.map((w, i) => (
+              <span
+                key={i}
+                className={`px-2 py-0.5 rounded text-sm ${
+                  w.status === "hit"
+                    ? "bg-emerald-500/15 text-emerald-300"
+                    : "bg-red-500/15 text-red-300 line-through"
+                }`}
+              >
+                {w.word}
+              </span>
+            ))}
+          </div>
+          {result.transcript && (
+            <div className="mt-3 text-[11px] text-zinc-500 italic">You said: "{result.transcript}"</div>
+          )}
+          <div className="mt-3 flex gap-2">
+            <button onClick={onStart} className="btn-ghost text-xs" data-testid="pron-retry-btn">
+              <Repeat size={11} /> Try again
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

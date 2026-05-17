@@ -12,6 +12,9 @@ import { MapPin, Play, ArrowLeft } from "lucide-react";
 
 export default function Setup() {
   const { scenarioId } = useParams();
+  const isCustom = scenarioId?.startsWith("custom-");
+  const customId = isCustom ? scenarioId.slice("custom-".length) : null;
+
   const nav = useNavigate();
   const [catalog, setCatalog] = useState(null);
   const [scenario, setScenario] = useState(null);
@@ -24,17 +27,25 @@ export default function Setup() {
   useEffect(() => {
     api.get("/catalog").then((r) => {
       setCatalog(r.data);
-      setScenario(r.data.scenarios.find((s) => s.id === scenarioId));
+      if (!isCustom) {
+        setScenario(r.data.scenarios.find((s) => s.id === scenarioId));
+      }
     });
-  }, [scenarioId]);
+    if (isCustom && customId) {
+      api.get(`/custom-scenarios/${customId}`)
+        .then((r) => setScenario({ ...r.data, is_custom: true }))
+        .catch(() => setError("Custom character not found"));
+    }
+  }, [scenarioId, isCustom, customId]);
 
   const start = async () => {
     setStarting(true);
     setError("");
     try {
-      const { data } = await api.post("/sessions", {
-        scenario_id: scenarioId, language, difficulty,
-      });
+      const body = isCustom
+        ? { custom_id: customId, language, difficulty }
+        : { scenario_id: scenarioId, language, difficulty };
+      const { data } = await api.post("/sessions", body);
       sessionStorage.setItem(`voice-${data.id}`, voice ? "1" : "0");
       nav(`/chat/${data.id}`);
     } catch (e) {

@@ -31,7 +31,7 @@ from auth import (
 )
 from scenarios import (
     SCENARIOS, LANGUAGES, DIFFICULTIES,
-    build_system_prompt, build_feedback_prompt,
+    build_system_prompt, build_system_prompt_from_char, build_feedback_prompt,
 )
 
 # ----- Setup -----
@@ -70,9 +70,29 @@ class UserOut(BaseModel):
 
 
 class SessionStartRequest(BaseModel):
-    scenario_id: str
+    scenario_id: Optional[str] = None
+    custom_id: Optional[str] = None
     language: Literal["en", "es", "fr"] = "en"
     difficulty: Literal["beginner", "intermediate", "advanced"] = "intermediate"
+
+
+class CustomScenarioCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    tagline: str = Field(min_length=1, max_length=140)
+    location: str = Field(min_length=1, max_length=120)
+    personality: str = Field(min_length=10, max_length=600)
+    tone_label: str = Field(min_length=1, max_length=40)
+    voice: Literal["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"] = "alloy"
+    image_key: str = Field(default="immigration_officer")
+    opener: str = Field(min_length=1, max_length=400)
+
+
+class PronunciationResult(BaseModel):
+    overall_score: int
+    accuracy: int
+    pace_wpm: int
+    transcript: str
+    words: List[dict]
 
 
 class SessionMessage(BaseModel):
@@ -196,20 +216,51 @@ async def auth_me(user=Depends(_current_user)):
 # ----- Sessions -----
 @api_router.post("/sessions", response_model=SessionOut)
 async def start_session(payload: SessionStartRequest, user=Depends(_current_user)):
-    if payload.scenario_id not in SCENARIOS:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-    sc = SCENARIOS[payload.scenario_id]
+    if not payload.scenario_id and not payload.custom_id:
+        raise HTTPException(status_code=400, detail="scenario_id or custom_id required")
+
+    if payload.custom_id:
+        custom = await db.custom_scenarios.find_one(
+            {"id": payload.custom_id, "user_id": user["id"]}, {"_id": 0}
+        )
+        if not custom:
+            raise HTTPException(status_code=404, detail="Custom scenario not found")
+        char = {
+            "name": custom["name"],
+            "location": custom["location"],
+            "personality": custom["personality"],
+            "tone": custom["tone_label"],
+            "tone_label": custom["tone_label"],
+            "voice": custom["voice"],
+            "image_key": custom.get("image_key", "immigration_officer"),
+            "is_custom": True,
+        }
+        scenario_id = f"custom-{custom['id']}"
+        opener = custom["opener"]
+    else:
+        if payload.scenario_id not in SCENARIOS:
+            raise HTTPException(status_code=404, detail="Scenario not found")
+        sc = SCENARIOS[payload.scenario_id]
+        char = {
+            "name": sc["name"], "location": sc["location"],
+            "personality": sc["personality"], "tone": sc["tone"],
+            "tone_label": sc["tone_label"], "voice": sc["voice"],
+            "image_key": sc["image_key"], "is_custom": False,
+        }
+        scenario_id = payload.scenario_id
+        opener = sc["opener"].get(payload.language, sc["opener"]["en"])
+
     session_id = str(uuid.uuid4())
-    opener = sc["opener"].get(payload.language, sc["opener"]["en"])
     doc = {
         "id": session_id,
         "user_id": user["id"],
-        "scenario_id": payload.scenario_id,
-        "scenario_name": sc["name"],
+        "scenario_id": scenario_id,
+        "scenario_name": char["name"],
         "language": payload.language,
         "difficulty": payload.difficulty,
-        "voice": sc["voice"],
-        "tone_label": sc["tone_label"],
+        "voice": char["voice"],
+        "tone_label": char["tone_label"],
+        "char": char,
         "messages": [
             {"role": "assistant", "text": opener, "created_at": _now_iso()},
         ],
@@ -217,7 +268,7 @@ async def start_session(payload: SessionStartRequest, user=Depends(_current_user
         "ended": False,
     }
     await db.sessions.insert_one(doc)
-    return SessionOut(**{k: v for k, v in doc.items() if k != "user_id"})
+    return SessionOut(**{k: v for k, v in doc.items() if k not in ("user_id", "char")})
 
 
 @api_router.get("/sessions")
@@ -247,7 +298,10 @@ async def chat_send(payload: ChatSendRequest, user=Depends(_current_user)):
     if not EMERGENT_LLM_KEY:
         raise HTTPException(status_code=500, detail="LLM key not configured")
 
-    system_msg = build_system_prompt(sess["scenario_id"], sess["language"], sess["difficulty"])
+    char = sess.get("char") or {
+        "name": sess["scenario_name"], "location": "", "personality": "", "tone": "",
+    }
+    system_msg = build_system_prompt_from_char(char, sess["language"], sess["difficulty"])
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=payload.session_id,
@@ -299,7 +353,7 @@ async def end_session(session_id: str, user=Depends(_current_user)):
     feedback_chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"{session_id}-feedback",
-        system_message=build_feedback_prompt(sess["language"], sess["scenario_id"]),
+        system_message=build_feedback_prompt(sess["language"], sess["scenario_name"]),
     ).with_model("anthropic", CLAUDE_MODEL)
 
     try:
@@ -411,6 +465,167 @@ async def tts(payload: TtsRequest, user=Depends(_current_user)):
     return StreamingResponse(io.BytesIO(audio_bytes), media_type="audio/mpeg")
 
 
+# ----- Custom Scenarios -----
+@api_router.post("/custom-scenarios")
+async def create_custom(payload: CustomScenarioCreate, user=Depends(_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        **payload.model_dump(),
+        "created_at": _now_iso(),
+    }
+    await db.custom_scenarios.insert_one(doc)
+    return {k: v for k, v in doc.items() if k not in ("user_id", "_id")}
+
+
+@api_router.get("/custom-scenarios")
+async def list_customs(user=Depends(_current_user)):
+    rows = await db.custom_scenarios.find(
+        {"user_id": user["id"]}, {"_id": 0, "user_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return rows
+
+
+@api_router.get("/custom-scenarios/{custom_id}")
+async def get_custom(custom_id: str, user=Depends(_current_user)):
+    row = await db.custom_scenarios.find_one(
+        {"id": custom_id, "user_id": user["id"]}, {"_id": 0, "user_id": 0}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    return row
+
+
+@api_router.delete("/custom-scenarios/{custom_id}")
+async def delete_custom(custom_id: str, user=Depends(_current_user)):
+    result = await db.custom_scenarios.delete_one({"id": custom_id, "user_id": user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"ok": True}
+
+
+# ----- Pronunciation Scoring -----
+def _normalize_word(w: str) -> str:
+    import unicodedata
+    w = unicodedata.normalize("NFD", w.lower())
+    w = "".join(c for c in w if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "", w)
+
+
+def _lcs_align(ref: list[str], hyp: list[str]) -> list[tuple[int, str]]:
+    """Return list of (ref_index, status) where status ∈ {'hit','miss'} for each ref word."""
+    # standard LCS
+    n, m = len(ref), len(hyp)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n):
+        for j in range(m):
+            dp[i + 1][j + 1] = dp[i][j] + 1 if ref[i] == hyp[j] else max(dp[i + 1][j], dp[i][j + 1])
+    matched = set()
+    i, j = n, m
+    while i > 0 and j > 0:
+        if ref[i - 1] == hyp[j - 1]:
+            matched.add(i - 1)
+            i -= 1
+            j -= 1
+        elif dp[i - 1][j] >= dp[i][j - 1]:
+            i -= 1
+        else:
+            j -= 1
+    return [(idx, "hit" if idx in matched else "miss") for idx in range(n)]
+
+
+@api_router.post("/voice/pronunciation")
+async def pronunciation_score(
+    file: UploadFile = File(...),
+    reference_text: str = Form(...),
+    language: str = Form("en"),
+    user=Depends(_current_user),
+):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="LLM key not configured")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty audio")
+    ext = (file.filename or "audio.webm").split(".")[-1].lower()
+    if ext not in {"mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"}:
+        ext = "webm"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+    try:
+        tmp.write(data)
+        tmp.flush()
+        tmp.close()
+        stt = OpenAISpeechToText(api_key=EMERGENT_LLM_KEY)
+        with open(tmp.name, "rb") as f:
+            resp = await stt.transcribe(
+                file=f, model="whisper-1",
+                response_format="verbose_json",
+                language=language,
+                timestamp_granularities=["word"],
+            )
+    except Exception as e:
+        logger.exception("Pronunciation STT failed")
+        raise HTTPException(status_code=502, detail=f"STT error: {str(e)[:120]}")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    transcript = (getattr(resp, "text", "") or "").strip()
+    word_objs = getattr(resp, "words", None) or []
+    # Build hyp word tokens with timestamps where available
+    hyp_words_raw = []
+    for w in word_objs:
+        word = getattr(w, "word", None) or (w.get("word") if isinstance(w, dict) else None) or ""
+        start = getattr(w, "start", None) or (w.get("start") if isinstance(w, dict) else None) or 0
+        end = getattr(w, "end", None) or (w.get("end") if isinstance(w, dict) else None) or 0
+        hyp_words_raw.append({"word": word, "start": float(start or 0), "end": float(end or 0)})
+    if not hyp_words_raw and transcript:
+        hyp_words_raw = [{"word": w, "start": 0, "end": 0} for w in transcript.split()]
+
+    ref_tokens = [t for t in re.split(r"\s+", reference_text) if t]
+    ref_norm = [_normalize_word(t) for t in ref_tokens]
+    hyp_norm = [_normalize_word(w["word"]) for w in hyp_words_raw]
+
+    # filter empty normalisations (punctuation only)
+    ref_pairs = [(i, t) for i, t in enumerate(ref_norm) if t]
+    hyp_filt = [t for t in hyp_norm if t]
+    matches = _lcs_align([t for _, t in ref_pairs], hyp_filt) if ref_pairs else []
+
+    word_results = []
+    match_lookup = {ref_pairs[k][0]: matches[k][1] for k in range(len(matches))}
+    for i, original in enumerate(ref_tokens):
+        status = match_lookup.get(i, "miss") if ref_norm[i] else "hit"
+        word_results.append({"word": original, "status": status})
+
+    hits = sum(1 for r in word_results if r["status"] == "hit")
+    total = max(1, len([r for r in word_results if _normalize_word(r["word"])]))
+    accuracy = round(hits / total * 100)
+
+    # WPM
+    duration_s = 0.0
+    if hyp_words_raw:
+        duration_s = max(w["end"] for w in hyp_words_raw) - min(w["start"] for w in hyp_words_raw)
+    wpm = int((len(hyp_filt) / (duration_s / 60))) if duration_s > 0.5 else 0
+    # bonus/penalty for pace vs natural conversational ~120-160 wpm
+    pace_penalty = 0
+    if 90 <= wpm <= 180:
+        pace_penalty = 0
+    elif wpm == 0:
+        pace_penalty = 5
+    else:
+        pace_penalty = min(15, abs(wpm - 135) // 8)
+
+    overall = max(0, min(100, accuracy - pace_penalty))
+    return {
+        "overall_score": overall,
+        "accuracy": accuracy,
+        "pace_wpm": wpm,
+        "transcript": transcript,
+        "words": word_results,
+    }
+
+
 # ----- Stats -----
 DAILY_GOAL = 1  # scenes per day
 
@@ -518,6 +733,7 @@ async def on_startup():
     await db.users.create_index("email", unique=True)
     await db.sessions.create_index([("user_id", 1), ("created_at", -1)])
     await db.sessions.create_index("share_id")
+    await db.custom_scenarios.create_index([("user_id", 1), ("created_at", -1)])
     await db.login_attempts.create_index("identifier")
     # admin seed
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

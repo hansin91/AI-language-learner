@@ -1,0 +1,37 @@
+{
+  "summary": "Backend regression + new-feature testing for AI Roleplay Simulator. 25/25 tests pass (100%). Previously passing 15 tests still green. New coverage: (a) Custom scenarios full CRUD with ownership isolation: POST/GET-list/GET-one/DELETE all enforce user_id scoping, _id/user_id correctly stripped from responses. (b) Custom-id session start uses scenario.char snapshot {name, location, personality, tone, voice, image_key, is_custom} and seeds opener exactly. (c) Claude Sonnet 4.5 chat in custom session replies in-character via build_system_prompt_from_char. (d) Custom session end generates valid feedback JSON. (e) Pronunciation: silent WAV + 5-word reference -> low accuracy with most words marked 'miss'; TTS-generated mp3 of the reference -> high accuracy (>=3/5 hits, accuracy >=60). LCS alignment, normalization, WPM and pace_penalty all correct.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/custom-scenarios", "issue": "POST returns 200 instead of 201 on creation (minor REST convention deviation)."},
+      {"endpoint": "/api/custom-scenarios/{id}", "issue": "DELETE by non-owner returns 404 'Not found' — semantically correct for not-leaking-existence, but a 403 could be more explicit. Current behaviour is acceptable and preferred for ownership privacy."},
+      {"endpoint": "/api/chat/send", "issue": "(Carried over from iter_1) Still replays full prior user-turn history through LlmChat on each send — O(N) latency growth."},
+      {"endpoint": "/api/voice/pronunciation", "issue": "Whisper `timestamp_granularities` requires response_format='verbose_json' — handled. However, if Whisper returns no `words` array (older SDK), code falls back to splitting transcript on whitespace; WPM then becomes 0. Acceptable but means pace scoring silently degrades."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Optional: Return 201 from POST /api/custom-scenarios for proper REST semantics.",
+    "Optional: Optimize /api/chat/send to avoid replaying full transcript (LlmChat session_id already persists state).",
+    "Optional: If Whisper returns no word timestamps, attempt a second call without granularities or log a warning so pace_wpm degradation is observable.",
+    "Optional: Consider adding rate limit on /api/custom-scenarios POST to prevent abuse (e.g. cap per user)."
+  ],
+  "critical_code_review_comments": [
+    "server.py: SessionStartRequest accepts both scenario_id and custom_id — if both are provided, custom_id silently wins. Consider explicitly 400 when both are set so client bugs surface early.",
+    "server.py: chat_send relies on sess.get('char'); older sessions created before the new schema fall back to a stubbed empty char {name, location:'', personality:'', tone:''} which makes Claude reply with no character grounding. Either run a migration or backfill at read time from SCENARIOS[scenario_id].",
+    "server.py: pronunciation_score does ext detection from filename only — a client uploading malicious .wav-named webm would be passed straight to Whisper. Acceptable for now since Whisper itself rejects bad audio, but consider sniffing magic bytes.",
+    "server.py: pronunciation_score handles dict/obj-style word entries with `getattr ... or w.get(...)` — fragile if SDK changes. Add a single normalize helper.",
+    "server.py: CustomScenarioCreate validates name<=60, opener<=400, but does not sanitize HTML/markdown — fine because content is used only as a system prompt to Claude, but worth a one-line comment.",
+    "scenarios.py: build_system_prompt_from_char silently defaults missing fields to 'a character' / 'an unspecified place' — could mask client bugs that send empty payloads. Consider raising in dev mode.",
+    "server.py is now ~760 lines; custom scenarios + pronunciation should ideally live in their own routers (e.g. routes/custom.py, routes/voice.py). Borderline acceptable; flag for next refactor pass."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "admin@roleplay.ai / Admin123! (verified). Test users created dynamically (test_user_*, test_user2_*).",
+  "seed_data_creation": "Per run: 2 dynamic users, 1 built-in (doctor) session with chat+feedback, 1 custom scenario (created and deleted), 1 custom-scenario session with chat+feedback. No persistent pollution since custom is deleted; sessions remain (used by stats assertions).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend healthy end-to-end against production preview URL. Regression file at /app/backend/tests/backend_test.py runs in ~30s and covers: catalog, auth, built-in session flow, custom CRUD + ownership, custom session chat/end, voice TTS, voice STT, voice pronunciation (silent + matching TTS audio), stats. Pronunciation matching test does real OpenAI TTS→STT round-trip and validates LCS alignment + WPM logic. If main agent adds new endpoints, append a new TestX class.",
+  "rca of the issue": "No bugs found in new iteration. All 10 new test cases passed on first execution against the live deployment."
+}

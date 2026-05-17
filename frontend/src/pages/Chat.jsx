@@ -30,6 +30,9 @@ export default function Chat() {
   const pronChunksRef = useRef([]);
   const pronTextRef = useRef("");
 
+  // Speaking speed (TTS) — persisted per session
+  const [speed, setSpeed] = useState(1.0);
+
   const scrollRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -37,8 +40,15 @@ export default function Chat() {
 
   useEffect(() => {
     setSpeakReply(sessionStorage.getItem(`voice-${sessionId}`) !== "0");
+    const savedSpeed = parseFloat(sessionStorage.getItem(`speed-${sessionId}`) || "1");
+    if (!Number.isNaN(savedSpeed) && savedSpeed >= 0.5 && savedSpeed <= 2) setSpeed(savedSpeed);
     api.get(`/sessions/${sessionId}`).then((r) => setSession(r.data)).catch(() => nav("/scenarios"));
   }, [sessionId, nav]);
+
+  const changeSpeed = (v) => {
+    setSpeed(v);
+    sessionStorage.setItem(`speed-${sessionId}`, String(v));
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -70,7 +80,7 @@ export default function Chat() {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ text, voice: session?.voice || "alloy" }),
+        body: JSON.stringify({ text, voice: session?.voice || "alloy", speed }),
       });
       if (!resp.ok) throw new Error("TTS failed");
       const blob = await resp.blob();
@@ -84,7 +94,7 @@ export default function Chat() {
     } catch (e) {
       setPlayingMsg(null);
     }
-  }, [session]);
+  }, [session, speed]);
 
   const send = async (text) => {
     const t = (text ?? input).trim();
@@ -289,6 +299,30 @@ export default function Chat() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <div
+              className="hidden sm:flex items-center gap-1 bg-[#141414] border border-white/10 rounded-full p-1"
+              data-testid="chat-speed-control"
+              title="AI speaking speed"
+            >
+              {[
+                { v: 0.75, label: "0.75x" },
+                { v: 1.0, label: "1x" },
+                { v: 1.25, label: "1.25x" },
+              ].map((s) => (
+                <button
+                  key={s.v}
+                  onClick={() => changeSpeed(s.v)}
+                  className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full transition ${
+                    speed === s.v
+                      ? "bg-[#d97736] text-[#0a0a0a]"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                  data-testid={`chat-speed-${String(s.v).replace(".", "_")}`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
             <button
               onClick={() => setSpeakReply((v) => !v)}
               className="btn-ghost text-xs"

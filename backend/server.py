@@ -127,6 +127,7 @@ class ChatSendResponse(BaseModel):
 class TtsRequest(BaseModel):
     text: str
     voice: str = "alloy"
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
 
 # ----- Helpers -----
@@ -454,10 +455,11 @@ async def tts(payload: TtsRequest, user=Depends(_current_user)):
         "alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"
     } else "alloy"
     text = payload.text[:4000]
+    speed = max(0.5, min(2.0, float(payload.speed or 1.0)))
     try:
         tts_client = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
         audio_bytes = await tts_client.generate_speech(
-            text=text, model="tts-1", voice=voice, response_format="mp3"
+            text=text, model="tts-1", voice=voice, response_format="mp3", speed=speed,
         )
     except Exception as e:
         logger.exception("TTS failed")

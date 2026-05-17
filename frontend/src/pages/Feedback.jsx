@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import api from "@/lib/api";
+import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle2, MessagesSquare, RotateCcw, LayoutDashboard, Sparkles } from "lucide-react";
+import { CheckCircle2, MessagesSquare, RotateCcw, LayoutDashboard, Sparkles, Share2, Copy } from "lucide-react";
 
 function ScoreBar({ label, value }) {
   return (
@@ -146,16 +147,40 @@ export default function Feedback() {
 
         {/* Actions */}
         <div className="flex flex-wrap gap-3 pt-4">
-          <Link to={`/setup/${sess.scenario_id}`} className="btn-primary" data-testid="feedback-replay-btn">
-            <RotateCcw size={14} /> Try this scene again
+          {sess.share_id && (
+            <button onClick={onShare} disabled={copying} className="btn-primary" data-testid="feedback-share-btn">
+              <Share2 size={14} /> {copying ? "Sharing…" : "Share this scene"}
+            </button>
+          )}
+          <Link to={`/setup/${sess.scenario_id}`} className="btn-ghost text-sm" data-testid="feedback-replay-btn">
+            <RotateCcw size={14} /> Try again
           </Link>
           <Link to="/scenarios" className="btn-ghost text-sm" data-testid="feedback-newscene-btn">
-            <MessagesSquare size={14} /> Pick a different scene
+            <MessagesSquare size={14} /> New scene
           </Link>
           <Link to="/dashboard" className="btn-ghost text-sm" data-testid="feedback-dashboard-btn">
             <LayoutDashboard size={14} /> Dashboard
           </Link>
         </div>
+
+        {sess.share_id && (
+          <div className="mt-6 rounded-xl border border-white/10 bg-[#141414] p-4 flex items-center gap-3" data-testid="share-link-box">
+            <div className="flex-1 min-w-0">
+              <div className="text-xs text-zinc-500 mb-1">Public link</div>
+              <div className="text-sm text-zinc-300 truncate font-mono">{shareLink}</div>
+            </div>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(shareLink);
+                toast.success("Copied");
+              }}
+              className="btn-ghost text-xs shrink-0"
+              data-testid="feedback-copy-link-btn"
+            >
+              <Copy size={12} /> Copy
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

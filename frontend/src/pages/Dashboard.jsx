@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import api, { CHARACTER_IMAGES } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { MessagesSquare, Trophy, Flame, Compass, ChevronRight } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { MessagesSquare, Trophy, Flame, Compass, ChevronRight, Target, CheckCircle2 } from "lucide-react";
 
 function StatCard({ icon: Icon, label, value, sub }) {
   return (
@@ -14,6 +15,72 @@ function StatCard({ icon: Icon, label, value, sub }) {
       </div>
       <div className="font-display font-black text-4xl tracking-tight">{value}</div>
       {sub && <div className="text-xs text-zinc-500 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+function StreakCard({ stats }) {
+  if (!stats) return null;
+  const days = stats.current_streak || 0;
+  const lit = stats.practiced_today;
+  return (
+    <div className="rounded-2xl glass p-6 relative overflow-hidden" data-testid="stat-streak">
+      <div
+        className={`absolute -right-4 -top-4 w-28 h-28 rounded-full blur-2xl transition-opacity duration-500 ${
+          lit ? "bg-[#d97736]/40 opacity-100" : "bg-zinc-500/10 opacity-60"
+        }`}
+        aria-hidden
+      />
+      <div className="relative">
+        <div className="flex items-center gap-3 mb-3 text-zinc-400">
+          <Flame
+            size={18}
+            className={lit ? "text-[#d97736] drop-shadow-[0_0_8px_rgba(217,119,54,0.7)]" : "text-zinc-600"}
+            fill={lit ? "currentColor" : "none"}
+          />
+          <span className="eyebrow text-[10px]">Current streak</span>
+        </div>
+        <div className="flex items-end gap-2">
+          <div className="font-display font-black text-5xl tracking-tight leading-none">{days}</div>
+          <div className="text-sm text-zinc-500 pb-1">{days === 1 ? "day" : "days"}</div>
+        </div>
+        <div className="text-xs text-zinc-500 mt-2" data-testid="streak-longest">
+          Longest: {stats.longest_streak || 0} · {lit ? "Lit today" : "Practice today to keep it alive"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DailyGoalCard({ stats }) {
+  if (!stats) return null;
+  const goal = stats.daily_goal || 1;
+  const done = stats.todays_count || 0;
+  const pct = Math.min(100, Math.round((done / goal) * 100));
+  const complete = done >= goal;
+  return (
+    <div className="rounded-2xl glass p-6" data-testid="stat-daily-goal">
+      <div className="flex items-center gap-3 mb-3 text-zinc-400">
+        <Target size={16} className="text-[#d97736]" />
+        <span className="eyebrow text-[10px]">Today's goal</span>
+      </div>
+      <div className="flex items-end gap-2 mb-3">
+        <div className="font-display font-black text-4xl tracking-tight leading-none">
+          {done}<span className="text-zinc-600">/{goal}</span>
+        </div>
+        <div className="text-sm text-zinc-500 pb-1">scenes</div>
+      </div>
+      <Progress value={pct} className="h-2 bg-white/5" />
+      <div className="text-xs mt-2 flex items-center gap-1.5">
+        {complete ? (
+          <>
+            <CheckCircle2 size={12} className="text-emerald-400" />
+            <span className="text-emerald-400">Goal hit. Bonus reps?</span>
+          </>
+        ) : (
+          <span className="text-zinc-500">{goal - done} more to keep your flame.</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -40,11 +107,24 @@ export default function Dashboard() {
         </h1>
         <p className="text-zinc-400 mb-10">Here's the tape from your recent scenes.</p>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-12 stagger">
-          <StatCard icon={MessagesSquare} label="Total scenes" value={stats?.total_sessions ?? 0} />
-          <StatCard icon={Flame} label="Completed" value={stats?.completed_sessions ?? 0} sub="with coach review" />
+        {/* Streak + Daily goal row */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-5 stagger">
+          <StreakCard stats={stats} />
+          <DailyGoalCard stats={stats} />
           <StatCard icon={Trophy} label="Avg score" value={stats?.average_score ?? 0} sub="out of 100" />
           <StatCard icon={Compass} label="Characters tried" value={stats?.scenarios_tried ?? 0} sub="of 8" />
+        </div>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-12 stagger">
+          <StatCard icon={MessagesSquare} label="Total scenes" value={stats?.total_sessions ?? 0} />
+          <StatCard icon={CheckCircle2} label="Completed" value={stats?.completed_sessions ?? 0} sub="with coach review" />
+          <div className="rounded-2xl glass p-6 sm:col-span-2 lg:col-span-2" data-testid="stat-last30">
+            <div className="flex items-center gap-3 mb-3 text-zinc-400">
+              <Flame size={14} className="text-[#d97736]" />
+              <span className="eyebrow text-[10px]">Last 30 days</span>
+            </div>
+            <Last30Heatmap activeDates={stats?.active_dates || []} />
+          </div>
         </div>
 
         <div className="flex items-end justify-between mb-6 flex-wrap gap-4">
@@ -97,3 +177,28 @@ export default function Dashboard() {
     </div>
   );
 }
+
+function Last30Heatmap({ activeDates }) {
+  const set = new Set(activeDates);
+  const today = new Date();
+  const cells = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(today.getDate() - i);
+    const iso = d.toISOString().slice(0, 10);
+    cells.push({ iso, active: set.has(iso), label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) });
+  }
+  return (
+    <div className="grid grid-cols-15 gap-1.5" style={{ gridTemplateColumns: "repeat(15, minmax(0, 1fr))" }}>
+      {cells.map((c) => (
+        <div
+          key={c.iso}
+          title={c.label}
+          className={`aspect-square rounded-[4px] ${c.active ? "bg-[#d97736]" : "bg-white/5"}`}
+          data-testid={`heatmap-${c.iso}`}
+        />
+      ))}
+    </div>
+  );
+}
+

@@ -9,9 +9,10 @@ import io
 import re
 import json
 import uuid
+import secrets
 import logging
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Literal
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Form
@@ -308,11 +309,17 @@ async def end_session(session_id: str, user=Depends(_current_user)):
         raise HTTPException(status_code=502, detail=f"AI feedback error: {str(e)[:120]}")
 
     feedback = _parse_feedback_json(raw)
+    share_id = sess.get("share_id") or secrets.token_urlsafe(10)
     await db.sessions.update_one(
         {"id": session_id},
-        {"$set": {"ended": True, "feedback": feedback, "ended_at": _now_iso()}},
+        {"$set": {
+            "ended": True,
+            "feedback": feedback,
+            "ended_at": _now_iso(),
+            "share_id": share_id,
+        }},
     )
-    return {"feedback": feedback}
+    return {"feedback": feedback, "share_id": share_id}
 
 
 def _parse_feedback_json(raw: str) -> dict:
@@ -405,18 +412,91 @@ async def tts(payload: TtsRequest, user=Depends(_current_user)):
 
 
 # ----- Stats -----
+DAILY_GOAL = 1  # scenes per day
+
+
+def _compute_streaks(active_dates: set[date]) -> tuple[int, int, bool]:
+    """Return (current_streak, longest_streak, practiced_today)."""
+    today = datetime.now(timezone.utc).date()
+    practiced_today = today in active_dates
+    # current streak: walk back from today (or yesterday if not practiced today)
+    current = 0
+    cursor = today if practiced_today else today - timedelta(days=1)
+    while cursor in active_dates:
+        current += 1
+        cursor -= timedelta(days=1)
+    # longest streak: scan all dates
+    longest = 0
+    if active_dates:
+        sorted_dates = sorted(active_dates)
+        run = 1
+        longest = 1
+        for i in range(1, len(sorted_dates)):
+            if (sorted_dates[i] - sorted_dates[i - 1]).days == 1:
+                run += 1
+                longest = max(longest, run)
+            else:
+                run = 1
+    return current, longest, practiced_today
+
+
 @api_router.get("/stats/me")
 async def my_stats(user=Depends(_current_user)):
     cursor = db.sessions.find({"user_id": user["id"]}, {"_id": 0, "messages": 0})
-    sessions = await cursor.to_list(500)
+    sessions = await cursor.to_list(1000)
     completed = [s for s in sessions if s.get("feedback")]
     scores = [s["feedback"]["overall_score"] for s in completed if s.get("feedback", {}).get("overall_score") is not None]
     avg = round(sum(scores) / len(scores), 1) if scores else 0
+
+    # Streaks: a "practice day" = any day the user started at least one session
+    active_dates: set[date] = set()
+    today = datetime.now(timezone.utc).date()
+    todays_count = 0
+    for s in sessions:
+        ts = s.get("created_at")
+        try:
+            dt = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
+            d = dt.date()
+            active_dates.add(d)
+            if d == today:
+                todays_count += 1
+        except Exception:
+            pass
+
+    current_streak, longest_streak, practiced_today = _compute_streaks(active_dates)
+
     return {
         "total_sessions": len(sessions),
         "completed_sessions": len(completed),
         "average_score": avg,
         "scenarios_tried": len({s["scenario_id"] for s in sessions}),
+        "current_streak": current_streak,
+        "longest_streak": longest_streak,
+        "practiced_today": practiced_today,
+        "todays_count": todays_count,
+        "daily_goal": DAILY_GOAL,
+        "active_dates": sorted([d.isoformat() for d in active_dates])[-30:],
+    }
+
+
+# ----- Sharing (public, no auth) -----
+@api_router.get("/share/{share_id}")
+async def get_shared_scene(share_id: str):
+    sess = await db.sessions.find_one({"share_id": share_id}, {"_id": 0})
+    if not sess:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    owner = await db.users.find_one({"id": sess["user_id"]}, {"_id": 0, "name": 1})
+    return {
+        "id": sess["id"],
+        "scenario_id": sess["scenario_id"],
+        "scenario_name": sess["scenario_name"],
+        "language": sess["language"],
+        "difficulty": sess["difficulty"],
+        "tone_label": sess.get("tone_label", ""),
+        "messages": sess["messages"],
+        "feedback": sess.get("feedback"),
+        "owner_name": owner["name"] if owner else None,
+        "created_at": sess["created_at"],
     }
 
 
@@ -437,6 +517,7 @@ app.add_middleware(
 async def on_startup():
     await db.users.create_index("email", unique=True)
     await db.sessions.create_index([("user_id", 1), ("created_at", -1)])
+    await db.sessions.create_index("share_id")
     await db.login_attempts.create_index("identifier")
     # admin seed
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

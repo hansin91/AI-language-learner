@@ -12,6 +12,7 @@ import Setup from "@/pages/Setup";
 import Chat from "@/pages/Chat";
 import Feedback from "@/pages/Feedback";
 import Dashboard from "@/pages/Dashboard";
+import SharePage from "@/pages/SharePage";
 
 function RedirectIfAuthed({ children }) {
   const { user } = useAuth();
@@ -33,6 +34,7 @@ function App() {
             <Route path="/chat/:sessionId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
             <Route path="/feedback/:sessionId" element={<ProtectedRoute><Feedback /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/share/:shareId" element={<SharePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster richColors theme="dark" />

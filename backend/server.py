@@ -619,6 +619,19 @@ async def pronunciation_score(
         pace_penalty = min(15, abs(wpm - 135) // 8)
 
     overall = max(0, min(100, accuracy - pace_penalty))
+
+    # Persist the attempt for the pronunciation streak
+    await db.pronunciation_attempts.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "overall_score": overall,
+        "accuracy": accuracy,
+        "pace_wpm": wpm,
+        "reference_text": reference_text[:400],
+        "transcript": transcript[:400],
+        "created_at": _now_iso(),
+    })
+
     return {
         "overall_score": overall,
         "accuracy": accuracy,
@@ -630,6 +643,7 @@ async def pronunciation_score(
 
 # ----- Stats -----
 DAILY_GOAL = 1  # scenes per day
+PRON_STREAK_THRESHOLD = 80  # min overall score needed to keep the pronunciation streak alive
 
 
 def _compute_streaks(active_dates: set[date]) -> tuple[int, int, bool]:
@@ -682,6 +696,27 @@ async def my_stats(user=Depends(_current_user)):
 
     current_streak, longest_streak, practiced_today = _compute_streaks(active_dates)
 
+    # Pronunciation streak: a "pronunciation day" = any day the user hit >= threshold on at least one attempt
+    pron_cursor = db.pronunciation_attempts.find(
+        {"user_id": user["id"]},
+        {"_id": 0, "overall_score": 1, "created_at": 1},
+    )
+    pron_attempts = await pron_cursor.to_list(2000)
+    pron_dates_qualified: set[date] = set()
+    pron_today_best = 0
+    pron_total = len(pron_attempts)
+    for a in pron_attempts:
+        try:
+            dt = datetime.fromisoformat(a["created_at"])
+            d = dt.date()
+            if a.get("overall_score", 0) >= PRON_STREAK_THRESHOLD:
+                pron_dates_qualified.add(d)
+            if d == today:
+                pron_today_best = max(pron_today_best, int(a.get("overall_score", 0)))
+        except Exception:
+            pass
+    pron_current, pron_longest, pron_practiced_today = _compute_streaks(pron_dates_qualified)
+
     return {
         "total_sessions": len(sessions),
         "completed_sessions": len(completed),
@@ -693,6 +728,12 @@ async def my_stats(user=Depends(_current_user)):
         "todays_count": todays_count,
         "daily_goal": DAILY_GOAL,
         "active_dates": sorted([d.isoformat() for d in active_dates])[-30:],
+        "pron_current_streak": pron_current,
+        "pron_longest_streak": pron_longest,
+        "pron_practiced_today": pron_practiced_today,
+        "pron_today_best": pron_today_best,
+        "pron_total_attempts": pron_total,
+        "pron_threshold": PRON_STREAK_THRESHOLD,
     }
 
 
@@ -736,6 +777,7 @@ async def on_startup():
     await db.sessions.create_index([("user_id", 1), ("created_at", -1)])
     await db.sessions.create_index("share_id")
     await db.custom_scenarios.create_index([("user_id", 1), ("created_at", -1)])
+    await db.pronunciation_attempts.create_index([("user_id", 1), ("created_at", -1)])
     await db.login_attempts.create_index("identifier")
     # admin seed
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()

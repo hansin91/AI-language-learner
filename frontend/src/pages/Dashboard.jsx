@@ -4,7 +4,7 @@ import Navbar from "@/components/Navbar";
 import api, { CHARACTER_IMAGES } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Progress } from "@/components/ui/progress";
-import { MessagesSquare, Trophy, Flame, Compass, ChevronRight, Target, CheckCircle2 } from "lucide-react";
+import { MessagesSquare, Trophy, Flame, Compass, ChevronRight, Target, CheckCircle2, MicVocal } from "lucide-react";
 
 function StatCard({ icon: Icon, label, value, sub }) {
   return (
@@ -85,6 +85,49 @@ function DailyGoalCard({ stats }) {
   );
 }
 
+function PronStreakCard({ stats }) {
+  if (!stats) return null;
+  const days = stats.pron_current_streak || 0;
+  const lit = stats.pron_practiced_today;
+  const threshold = stats.pron_threshold || 80;
+  const todayBest = stats.pron_today_best || 0;
+  return (
+    <div className="rounded-2xl glass p-6 relative overflow-hidden" data-testid="stat-pron-streak">
+      <div
+        className={`absolute -left-4 -top-4 w-28 h-28 rounded-full blur-2xl transition-opacity duration-500 ${
+          lit ? "bg-emerald-500/30 opacity-100" : "bg-zinc-500/10 opacity-60"
+        }`}
+        aria-hidden
+      />
+      <div className="relative">
+        <div className="flex items-center gap-3 mb-3 text-zinc-400">
+          <MicVocal
+            size={18}
+            className={lit ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "text-zinc-600"}
+            aria-hidden="true"
+          />
+          <span className="eyebrow text-[10px]">Pronunciation streak</span>
+        </div>
+        <div className="flex items-end gap-2">
+          <div className="font-display font-black text-5xl tracking-tight leading-none">{days}</div>
+          <div className="text-sm text-zinc-500 pb-1">{days === 1 ? "day" : "days"}</div>
+        </div>
+        <div className="text-xs text-zinc-500 mt-2" data-testid="pron-streak-detail">
+          Best today: <span className={`font-semibold ${todayBest >= threshold ? "text-emerald-400" : "text-white"}`}>{todayBest || "—"}</span>
+          {" · "}Longest: {stats.pron_longest_streak || 0}
+        </div>
+        <div className="text-[11px] text-zinc-600 mt-1">
+          {lit
+            ? `Locked in — you hit ≥${threshold} today.`
+            : todayBest > 0
+              ? `Hit ≥${threshold} on a Repeat to keep it alive.`
+              : `Tap the 🔁 on any AI line and score ≥${threshold}.`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
@@ -110,15 +153,16 @@ export default function Dashboard() {
         {/* Streak + Daily goal row */}
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-5 stagger">
           <StreakCard stats={stats} />
+          <PronStreakCard stats={stats} />
           <DailyGoalCard stats={stats} />
           <StatCard icon={Trophy} label="Avg score" value={stats?.average_score ?? 0} sub="out of 100" />
-          <StatCard icon={Compass} label="Characters tried" value={stats?.scenarios_tried ?? 0} sub="of 8" />
         </div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-12 stagger">
           <StatCard icon={MessagesSquare} label="Total scenes" value={stats?.total_sessions ?? 0} />
           <StatCard icon={CheckCircle2} label="Completed" value={stats?.completed_sessions ?? 0} sub="with coach review" />
-          <div className="rounded-2xl glass p-6 sm:col-span-2 lg:col-span-2" data-testid="stat-last30">
+          <StatCard icon={Compass} label="Characters tried" value={stats?.scenarios_tried ?? 0} sub="of 8" />
+          <div className="rounded-2xl glass p-6 sm:col-span-2 lg:col-span-1" data-testid="stat-last30">
             <div className="flex items-center gap-3 mb-3 text-zinc-400">
               <Flame size={14} className="text-[#d97736]" />
               <span className="eyebrow text-[10px]">Last 30 days</span>
